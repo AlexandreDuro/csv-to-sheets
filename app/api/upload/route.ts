@@ -71,10 +71,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Aucun fichier fourni' }, { status: 400 });
     }
 
+    // Extract listing name from filename (e.g., "la_jungle.csv" -> "La Jungle")
+    const fileName = file.name.replace('.csv', '');
+    const listingNameFromFile = fileName
+      .split('_')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+
     const csvText = await file.text();
 
     // 1. Parse CSV
-    const parseResult = Papa.parse<AirbnbCSVRow>(csvText, {
+    const parseResult = Papa.parse<any>(csvText, {
       header: true,
       skipEmptyLines: true,
     });
@@ -86,6 +93,18 @@ export async function POST(req: NextRequest) {
 
     const rows = parseResult.data;
     const logs: string[] = [];
+
+    // Detect Type
+    const firstRow = rows[0] || {};
+    const isBooking = 'Reference number' in firstRow;
+    const isAirbnb = 'Code de confirmation' in firstRow;
+
+    if (!isBooking && !isAirbnb) {
+      return NextResponse.json({ success: false, error: 'Format CSV non reconnu (ni Airbnb, ni Booking)' }, { status: 400 });
+    }
+
+    const platform = isBooking ? 'booking' : 'airbnb';
+    logs.push(`ℹ️ Format détecté : ${platform === 'booking' ? 'Booking.com' : 'Airbnb'}`);
 
     // 2. Extract Metadata
     // Without manual selection, we can't get the commission rate from the sheet name easily.
@@ -100,50 +119,71 @@ export async function POST(req: NextRequest) {
     // 3. Transform Data
     const dataRows: any[][] = [];
 
+    // Helper for Booking Dates "4 Aug 2025"
+    const parseBookingDate = (dateStr: string): Date | null => {
+      if (!dateStr) return null;
+      const date = new Date(dateStr);
+      return isNaN(date.getTime()) ? null : date;
+    };
+
     for (const row of rows) {
-      if (!row['Date de début'] || !row['Voyageur']) continue;
+      let id, listingName, startDate, endDate, guestName, grossIncome;
 
-      const startDate = parseDate(row['Date de début']);
-      if (!startDate) continue;
+      if (isAirbnb) {
+        if (!row['Date de début'] || !row['Voyageur']) continue;
+        startDate = parseDate(row['Date de début']);
+        if (!startDate) continue;
 
-      const endDate = parseDate(row['Date de fin']);
+        id = row['Code de confirmation'];
+        listingName = row['Logement'] || 'Inconnu';
+        // Clean listing name
+        const separatorMatch = listingName.match(/ [–-] /);
+        if (separatorMatch && separatorMatch.index) {
+          listingName = listingName.substring(0, separatorMatch.index).trim();
+        }
 
-      const grossIncome = parseAmount(row['Montant']);
-      const cleaningFee = parseAmount(row['Frais de ménage']);
-      const commission = (grossIncome - cleaningFee) * commissionRate;
+        endDate = parseDate(row['Date de fin']);
+        guestName = row['Voyageur'];
+        grossIncome = parseAmount(row['Montant']);
 
-      // Clean up Listing Name from CSV
-      // Example: "La Jungle – À Deux Pas de la Mer..." -> "La Jungle"
-      // We can try to take the part before "–" or "-"
-      let listingName = row['Logement'] || 'Inconnu';
-      const separatorMatch = listingName.match(/ [–-] /);
-      if (separatorMatch && separatorMatch.index) {
-        listingName = listingName.substring(0, separatorMatch.index).trim();
+      } else { // Booking
+        if (!row['Check-in'] || !row['Guest name']) continue;
+        startDate = parseBookingDate(row['Check-in']);
+        if (!startDate) continue;
+
+        id = row['Reference number'];
+        listingName = listingNameFromFile;
+        endDate = parseBookingDate(row['Checkout']);
+        guestName = row['Guest name'];
+        grossIncome = parseAmount(row['Amount']);
       }
+
+      const commission = grossIncome * commissionRate;
 
       // Schema:
       // id, plateforme, logement_nom_raw, logement, date_debut, date_fin, mois, annee, voyageur, revenus_bruts, frais_menage, commission_taux, commission, date_import
 
       dataRows.push([
-        row['Code de confirmation'], // id
-        'airbnb', // plateforme
-        row['Logement'], // logement_nom_raw
-        listingName, // logement (derived from CSV)
+        id, // id
+        platform, // plateforme
+        isAirbnb ? row['Logement'] : 'Inconnu', // logement_nom_raw
+        listingName, // logement
         "'" + formatDateFR(startDate), // date_debut (Formatted DD/MM/YYYY, forced text)
         endDate ? "'" + formatDateFR(endDate) : '', // date_fin (Formatted DD/MM/YYYY, forced text)
         getMonthName(startDate), // mois
         startDate.getFullYear(), // annee
-        row['Voyageur'], // voyageur
+        guestName, // voyageur
         grossIncome, // revenus_bruts
-        cleaningFee, // frais_menage
-        '', // commission_taux (Left empty as requested)
-        '', // commission (Left empty as requested)
+        '', // frais_menage (Left empty as requested)
+        '', // commission_taux
+        '', // commission
         "'" + importDate // date_import (YYYY-MM-DD, forced text)
       ]);
     }
 
     if (dataRows.length === 0) {
-      return NextResponse.json({ success: true, logs: ['Aucune réservation trouvée.'] });
+      logs.push('Aucune réservation trouvée.');
+      return NextResponse.json({ success: true, logs });
     }
 
     // 4. Google Sheets Integration
@@ -240,3 +280,4 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: false, error: error.message, logs: [error.message] }, { status: 500 });
   }
 }
+

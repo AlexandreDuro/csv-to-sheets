@@ -106,3 +106,4 @@ csv-to-sheets/
 - Assurez-vous que le Service Account a bien les permissions d'édition sur le Google Sheets
 - La clé privée doit contenir les retours à la ligne (`\n`) correctement formatés
 
+
