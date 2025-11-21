@@ -48,6 +48,10 @@ function extractCommissionRate(sheetName: string): number {
   return match ? parseInt(match[1]) / 100 : 0;
 }
 
+function removeAccents(str: string): string {
+  return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
 function extractListingName(sheetName: string): string {
   // Example: "25% La Jungle - Plérin / Amandie & Rémi VIGIER" -> "La Jungle"
   // Strategy: Remove percentage, take text before first " - " or " / "
@@ -135,7 +139,7 @@ export async function POST(req: NextRequest) {
         if (!startDate) continue;
 
         id = row['Code de confirmation'];
-        listingName = row['Logement'] || 'Inconnu';
+        listingName = removeAccents(row['Logement'] || 'Inconnu');
         // Clean listing name
         const separatorMatch = listingName.match(/ [–-] /);
         if (separatorMatch && separatorMatch.index) {
@@ -152,7 +156,7 @@ export async function POST(req: NextRequest) {
         if (!startDate) continue;
 
         id = row['Reference number'];
-        listingName = listingNameFromFile;
+        listingName = removeAccents(listingNameFromFile);
         endDate = parseBookingDate(row['Checkout']);
         guestName = row['Guest name'];
         grossIncome = parseAmount(row['Amount']);
