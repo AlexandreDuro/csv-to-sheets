@@ -159,7 +159,7 @@ export async function POST(req: NextRequest) {
         listingName = removeAccents(listingNameFromFile);
         endDate = parseBookingDate(row['Checkout']);
         guestName = row['Guest name'];
-        grossIncome = parseAmount(row['Amount']);
+        grossIncome = parseAmount(row['Net']);
       }
 
       const commission = grossIncome * commissionRate;
