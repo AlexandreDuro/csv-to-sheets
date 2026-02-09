@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "googleapis": "^129.0.0",
-    "next": "14.2.5",
+    "next": "14.2.35",
     "papaparse": "^5.4.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -31,4 +31,3 @@
     "typescript": "^5.5.3"
   }
 }
-
